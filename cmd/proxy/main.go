@@ -3,17 +3,18 @@ package main
 import (
 	"context"
 	"log"
-	"main/proxy"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/NicoKleinschmidt/pancake-proxy/proxy"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 func main() {
-	viper.SetDefault("bind_address", ":8080")
-	viper.SetDefault("service_update_interval", time.Second*30)
+	viper.SetDefault("bindAddress", ":8080")
+	viper.SetDefault("serviceUpdateInterval", time.Second*30)
 
 	viper.AddConfigPath("/etc/pancake")
 	viper.AddConfigPath(".")
@@ -22,22 +23,29 @@ func main() {
 	viper.AutomaticEnv()
 	viper.ReadInConfig()
 
-	var upstreams []proxy.UpstreamConfig
-	if err := viper.UnmarshalKey("servers", &upstreams); err != nil {
-		log.Fatalln("Config: servers key is bad", err)
+	var logger *zap.Logger
+	if viper.GetBool("logger.development") {
+		logger = zap.Must(zap.NewDevelopment())
+	} else {
+		logger = zap.Must(zap.NewProduction())
 	}
 
-	srv := proxy.NewServer(proxy.ServerConfig{
-		Upstreams:             upstreams,
-		ServiceUpdateInterval: viper.GetDuration("service_update_interval"),
-	})
+	zap.ReplaceGlobals(logger.Named("global"))
+
+	var config proxy.ServerConfig
+	if err := viper.Unmarshal(&config); err != nil {
+		log.Fatalln("Failed to unmarshal config", err)
+	}
+
+	config.Logger = logger.Named("server")
+	srv := proxy.NewServer(config)
 
 	go func() {
-		err := srv.RunBackgroundLoop(context.Background())
+		err := srv.RunProxy(context.Background())
 		panic(err)
 	}()
 
-	addr := viper.GetString("bind_address")
+	addr := viper.GetString("bindAddress")
 	log.Printf("Starting proxy on %s\n", addr)
 	err := http.ListenAndServeTLS(addr, "server.crt", "server.key", srv)
 	log.Fatalln(err)

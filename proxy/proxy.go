@@ -5,8 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
-	"main/utils"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,7 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/NicoKleinschmidt/pancake-proxy/utils"
 	"github.com/jhump/protoreflect/grpcreflect"
+	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -39,13 +39,17 @@ type proxy struct {
 	services      map[string]*upstreamService
 	servicesMutex *sync.RWMutex
 
-	serviceUpdateInterval time.Duration
+	internalServer *grpc.Server
+	logger         *zap.Logger
+
+	serviceUpdateInterval    time.Duration
+	disableReflectionService bool
 }
 
 // RunBackgroundLoop MUST be called before the first request can be served.
 // The function will block until the context is cancelled.
 // This function will always return a non nil error.
-func (p *proxy) RunBackgroundLoop(ctx context.Context) error {
+func (p *proxy) RunProxy(ctx context.Context) error {
 	ticker := time.NewTicker(p.serviceUpdateInterval)
 	defer ticker.Stop()
 
@@ -70,6 +74,10 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Trailer", "Grpc-Status, Grpc-Message")
+
+	if p.handleReflection(w, r, serviceName) {
+		return
+	}
 
 	server, ok := p.findServer(serviceName)
 	if !ok {
@@ -128,7 +136,7 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 
 	response, err := client.Do(req)
 	if err != nil {
-		log.Println("Failed to start request", err)
+		p.logger.Debug("Failed to start request", zap.Error(err))
 		return
 	}
 
@@ -140,12 +148,12 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 
 	w.WriteHeader(response.StatusCode)
 	if response.StatusCode != 200 {
-		log.Printf("received bad status: %d\n", response.StatusCode)
+		p.logger.Debug("received bad status", zap.Int("status_code", response.StatusCode))
 		return
 	}
 
 	if _, err := io.Copy(utils.HttpAutoFlusher(w), response.Body); err != nil {
-		log.Println("Request cancelled", err)
+		p.logger.Debug("Request cancelled", zap.Error(err))
 		return
 	}
 
@@ -168,7 +176,7 @@ func (p *proxy) updateServices() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(upstreams))
 
-	log.Printf("Updating %d upstream server(s)\n", len(upstreams))
+	p.logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
 
 	for _, server := range upstreams {
 		go func(server *serverInfo) {
@@ -176,14 +184,14 @@ func (p *proxy) updateServices() {
 
 			conn, err := grpc.NewClient(server.host, server.dialOptions()...)
 			if err != nil {
-				log.Println("Failed to dial service", server.host, err)
+				p.logger.Error("Failed to dial service", zap.String("target_host", server.host), zap.Error(err))
 				return
 			}
 
 			client := grpcreflect.NewClientAuto(context.Background(), conn)
 			services, err := client.ListServices()
 			if err != nil {
-				log.Println("Failed to query services", server.host, err)
+				p.logger.Error("Failed to query services", zap.String("target_host", server.host), zap.Error(err))
 				return
 			}
 
@@ -195,8 +203,6 @@ func (p *proxy) updateServices() {
 	}
 
 	wg.Wait()
-
-	log.Printf("Got %d successful result(s)\n", len(results))
 
 	p.servicesMutex.Lock()
 	defer p.servicesMutex.Unlock()
@@ -219,6 +225,7 @@ func (p *proxy) updateServices() {
 }
 
 func writeGrpcStatus(w http.ResponseWriter, code codes.Code, msg string) {
+	w.Header().Set("Content-Type", "application/grpc")
 	w.WriteHeader(200)
 	w.Header().Add("Grpc-Status", strconv.Itoa(int(code)))
 	w.Header().Add("Grpc-Message", msg)
