@@ -4,9 +4,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NicoKleinschmidt/pancake-proxy/reflection"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1"
+	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 )
 
 type UpstreamConfig struct {
@@ -19,7 +21,7 @@ type ServerConfig struct {
 	Upstreams             []UpstreamConfig `mapstructure:"servers"`
 	ServiceUpdateInterval time.Duration    `mapstructure:"serviceUpdateInterval"`
 
-	// DisableReflection will not expose the
+	// DisableReflection will not expose the reflection service
 	DisableReflection bool `mapstructure:"disableReflection"`
 
 	Logger *zap.Logger
@@ -41,7 +43,7 @@ func NewServer(config ServerConfig) *proxy {
 	}
 
 	grpc_reflection_v1.RegisterServerReflectionServer(p.internalServer, p)
-	// grpc_reflection_v1alpha.RegisterServerReflectionServer(p.internalServer, reflection.AsV1Alpha(p))
+	grpc_reflection_v1alpha.RegisterServerReflectionServer(p.internalServer, reflection.AlphaConverter{Inner: p})
 
 	return p
 }
