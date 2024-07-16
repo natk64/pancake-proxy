@@ -29,6 +29,7 @@ type ServerConfig struct {
 
 func NewServer(config ServerConfig) *proxy {
 	p := &proxy{
+		reflectionResolver:       &customResolver{},
 		services:                 make(map[string]*upstreamService),
 		servicesMutex:            &sync.RWMutex{},
 		serviceUpdateInterval:    config.ServiceUpdateInterval,

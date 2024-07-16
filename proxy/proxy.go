@@ -20,12 +20,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type serverInfo struct {
 	host               string
 	plaintext          bool
 	insecureSkipVerify bool
+
+	reflectionClient *grpcreflect.Client
 }
 
 type upstreamService struct {
@@ -35,6 +38,8 @@ type upstreamService struct {
 
 type proxy struct {
 	upstreams []*serverInfo
+
+	reflectionResolver *customResolver
 
 	services      map[string]*upstreamService
 	servicesMutex *sync.RWMutex
@@ -164,10 +169,26 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 	}
 }
 
+func (srv *serverInfo) reflectClient() (*grpcreflect.Client, error) {
+	if srv.reflectionClient != nil {
+		return srv.reflectionClient, nil
+	}
+
+	conn, err := grpc.NewClient(srv.host, srv.dialOptions()...)
+	if err != nil {
+		return nil, err
+	}
+
+	client := grpcreflect.NewClientAuto(context.Background(), conn)
+	srv.reflectionClient = client
+	return client, nil
+}
+
 func (p *proxy) updateServices() {
 	type result struct {
-		server   *serverInfo
-		services []string
+		server          *serverInfo
+		services        []string
+		fileDescriptors []protoreflect.FileDescriptor
 	}
 
 	var results []result
@@ -182,22 +203,34 @@ func (p *proxy) updateServices() {
 		go func(server *serverInfo) {
 			defer wg.Done()
 
-			conn, err := grpc.NewClient(server.host, server.dialOptions()...)
+			logger := p.logger.With(zap.String("target_host", server.host))
+			client, err := server.reflectClient()
 			if err != nil {
-				p.logger.Error("Failed to dial service", zap.String("target_host", server.host), zap.Error(err))
+				logger.Error("Failed to create reflection client", zap.Error(err))
 				return
 			}
 
-			client := grpcreflect.NewClientAuto(context.Background(), conn)
 			services, err := client.ListServices()
 			if err != nil {
-				p.logger.Error("Failed to query services", zap.String("target_host", server.host), zap.Error(err))
+				logger.Error("Failed to query services", zap.Error(err))
 				return
+			}
+
+			var fds []protoreflect.FileDescriptor
+			for _, service := range services {
+				fd, err := client.FileContainingSymbol(service)
+				if err != nil {
+					logger.Error("Failed to resolve service", zap.String("service_name", service))
+					continue
+				}
+
+				fds = append(fds, fd.UnwrapFile())
 			}
 
 			results = append(results, result{
-				server:   server,
-				services: services,
+				server:          server,
+				services:        services,
+				fileDescriptors: fds,
 			})
 		}(server)
 	}
@@ -219,8 +252,13 @@ func (p *proxy) updateServices() {
 				p.services[serviceName] = service
 			}
 
+			if err := p.reflectionResolver.RegisterFiles(result.fileDescriptors); err != nil {
+				p.logger.Error("Failed to register proto files for server", zap.Error(err), zap.String("target_host", result.server.host))
+			}
+
 			service.servers = append(service.servers, result.server)
 		}
+
 	}
 }
 
