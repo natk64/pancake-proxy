@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/reflection"
 	"github.com/natk64/pancake-proxy/utils"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
@@ -38,7 +39,7 @@ type upstreamService struct {
 type proxy struct {
 	upstreams []*serverInfo
 
-	reflectionResolver *customResolver
+	reflectionResolver *reflection.SimpleResolver
 
 	services      map[string]*upstreamService
 	servicesMutex *sync.RWMutex

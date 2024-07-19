@@ -1,14 +1,14 @@
 package proxy
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"sort"
 
+	"github.com/natk64/pancake-proxy/reflection"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -47,7 +47,11 @@ func (p *proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_
 			return err
 		}
 
-		sendError := func(err error) {
+		getError := func(err error) *grpc_reflection_v1.ErrorResponse {
+			if errors.Is(err, protoregistry.NotFound) {
+				return &grpc_reflection_v1.ErrorResponse{ErrorCode: int32(codes.NotFound)}
+			}
+
 			s, ok := status.FromError(err)
 			response := grpc_reflection_v1.ErrorResponse{}
 			response.ErrorCode = int32(s.Code())
@@ -55,9 +59,13 @@ func (p *proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_
 				response.ErrorMessage = s.Message()
 			}
 
+			return &response
+		}
+
+		sendError := func(err error) {
 			stream.Send(&grpc_reflection_v1.ServerReflectionResponse{
 				MessageResponse: &grpc_reflection_v1.ServerReflectionResponse_ErrorResponse{
-					ErrorResponse: &response,
+					ErrorResponse: getError(err),
 				},
 			})
 		}
@@ -131,16 +139,10 @@ func (p *proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_
 	}
 }
 
-type ExtensionResolver interface {
-	protoregistry.ExtensionTypeResolver
-	RangeExtensionsByMessage(message protoreflect.FullName, f func(protoreflect.ExtensionType) bool)
-}
-
 type reflectionHandler struct {
 	sentFileDescriptors map[string]bool
 	proxy               *proxy
-	resolver            protodesc.Resolver
-	extResolver         ExtensionResolver
+	resolver            reflection.FileExtensionResolver
 }
 
 func newReflectionHandler(proxy *proxy) *reflectionHandler {
@@ -148,7 +150,6 @@ func newReflectionHandler(proxy *proxy) *reflectionHandler {
 		sentFileDescriptors: make(map[string]bool),
 		proxy:               proxy,
 		resolver:            proxy.reflectionResolver,
-		extResolver:         proxy.reflectionResolver,
 	}
 }
 
@@ -189,27 +190,22 @@ func (p *reflectionHandler) fileContainingSymbol(symbol string) (*grpc_reflectio
 }
 
 func (p *reflectionHandler) fileContainingExtension(ext *grpc_reflection_v1.ExtensionRequest) (*grpc_reflection_v1.FileDescriptorResponse, error) {
-	xt, err := p.extResolver.FindExtensionByNumber(protoreflect.FullName(ext.ContainingType), protoreflect.FieldNumber(ext.ExtensionNumber))
+	xt, err := p.resolver.FindExtensionByNumber(protoreflect.FullName(ext.ContainingType), protoreflect.FieldNumber(ext.ExtensionNumber))
 	if err != nil {
 		return nil, err
 	}
-	return p.fileDescWithDependencies(xt.TypeDescriptor().ParentFile())
+	return p.fileDescWithDependencies(xt.ParentFile())
 }
 
 func (p *reflectionHandler) allExtensionNumbersOfType(name string) (*grpc_reflection_v1.ExtensionNumberResponse, error) {
-	var numbers []int32
-	p.extResolver.RangeExtensionsByMessage(protoreflect.FullName(name), func(xt protoreflect.ExtensionType) bool {
-		numbers = append(numbers, int32(xt.TypeDescriptor().Number()))
-		return true
-	})
+	numbers, err := p.resolver.GetExtensionsByMessage(protoreflect.FullName(name))
+	if err != nil {
+		return nil, err
+	}
+
 	sort.Slice(numbers, func(i, j int) bool {
 		return numbers[i] < numbers[j]
 	})
-	if len(numbers) == 0 {
-		if _, err := p.resolver.FindDescriptorByName(protoreflect.FullName(name)); err != nil {
-			return nil, err
-		}
-	}
 
 	return &grpc_reflection_v1.ExtensionNumberResponse{BaseTypeName: name, ExtensionNumber: numbers}, nil
 }
@@ -244,68 +240,4 @@ func (p *reflectionHandler) fileDescWithDependencies(fd protoreflect.FileDescrip
 	}
 
 	return &grpc_reflection_v1.FileDescriptorResponse{FileDescriptorProto: r}, nil
-}
-
-var (
-	_ protodesc.Resolver = &customResolver{}
-	_ ExtensionResolver  = &customResolver{}
-)
-
-type customResolver struct {
-	registry *protoregistry.Files
-}
-
-// FindExtensionByName implements ExtensionResolver.
-func (cr *customResolver) FindExtensionByName(field protoreflect.FullName) (protoreflect.ExtensionType, error) {
-	desc, err := cr.registry.FindDescriptorByName(field)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(desc)
-	return nil, status.Error(codes.Unimplemented, "")
-}
-
-// FindExtensionByNumber implements ExtensionResolver.
-func (cr *customResolver) FindExtensionByNumber(message protoreflect.FullName, field protowire.Number) (protoreflect.ExtensionType, error) {
-	desc, err := cr.registry.FindDescriptorByName(message)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(desc)
-	return nil, status.Error(codes.Unimplemented, "")
-}
-
-// RangeExtensionsByMessage implements ExtensionResolver.
-func (cr *customResolver) RangeExtensionsByMessage(message protoreflect.FullName, f func(protoreflect.ExtensionType) bool) {
-	desc, err := cr.registry.FindDescriptorByName(message)
-	if err != nil {
-		return
-	}
-	fmt.Println(desc)
-}
-
-// FindDescriptorByName implements protodesc.Resolver.
-func (cr *customResolver) FindDescriptorByName(name protoreflect.FullName) (protoreflect.Descriptor, error) {
-	return cr.registry.FindDescriptorByName(name)
-}
-
-// FindFileByPath implements protodesc.Resolver.
-func (cr *customResolver) FindFileByPath(path string) (protoreflect.FileDescriptor, error) {
-	return cr.registry.FindFileByPath(path)
-}
-
-func (cr *customResolver) Clear() {
-	cr.registry = nil
-}
-
-func (cr *customResolver) RegisterFiles(fds []protoreflect.FileDescriptor) error {
-	if cr.registry == nil {
-		cr.registry = &protoregistry.Files{}
-	}
-
-	for _, fd := range fds {
-		cr.registry.RegisterFile(fd)
-	}
-
-	return nil
 }
