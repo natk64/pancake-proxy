@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/NicoKleinschmidt/pancake-proxy/utils"
 	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/utils"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"

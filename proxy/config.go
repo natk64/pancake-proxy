@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/NicoKleinschmidt/pancake-proxy/reflection"
+	"github.com/natk64/pancake-proxy/reflection"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1"

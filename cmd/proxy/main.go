@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NicoKleinschmidt/pancake-proxy/proxy"
+	"github.com/natk64/pancake-proxy/proxy"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )

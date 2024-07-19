@@ -1,4 +1,4 @@
-module github.com/NicoKleinschmidt/pancake-proxy
+module github.com/natk64/pancake-proxy
 
 go 1.22.2
 
