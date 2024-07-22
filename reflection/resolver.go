@@ -100,7 +100,7 @@ func (cr *SimpleResolver) registerFileLocked(fd protoreflect.FileDescriptor) {
 	for i := 0; i < messages.Len(); i++ {
 		name := messages.Get(i).FullName()
 		if cr.extensionMap[name] == nil {
-			cr.extensionMap[name] = make(map[protowire.Number]protoreflect.FieldDescriptor)
+			cr.extensionMap[name] = nil
 		}
 	}
 

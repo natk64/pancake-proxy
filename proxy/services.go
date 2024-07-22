@@ -1,11 +1,10 @@
 package proxy
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 
-	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/reflection"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -18,7 +17,7 @@ type upstreamService struct {
 
 // reflectClient returns the grpc reflection client for the server.
 // If no client is connected, a new one is created.
-func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
+func (srv *upstreamServer) reflectClient() (*reflection.ReflectionClient, error) {
 	if srv.reflectionClient != nil {
 		return srv.reflectionClient, nil
 	}
@@ -28,7 +27,7 @@ func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
 		return nil, err
 	}
 
-	client := grpcreflect.NewClientAuto(context.Background(), conn)
+	client := reflection.NewClient(conn)
 	srv.reflectionClient = client
 	return client, nil
 }
@@ -70,13 +69,13 @@ func (p *Proxy) UpdateServices(provider string) {
 
 			var fds []protoreflect.FileDescriptor
 			for _, service := range services {
-				fd, err := client.FileContainingSymbol(service)
+				allFiles, err := client.AllFilesForSymbol(service)
 				if err != nil {
 					logger.Error("Failed to resolve service", zap.String("service_name", service))
 					continue
 				}
 
-				fds = append(fds, fd.UnwrapFile())
+				fds = append(fds, allFiles...)
 			}
 
 			results[i] = result{
