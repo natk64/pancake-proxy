@@ -16,28 +16,28 @@ import (
 	"github.com/natk64/pancake-proxy/reflection"
 	"github.com/natk64/pancake-proxy/utils"
 	"go.uber.org/zap"
-	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type serverInfo struct {
+type upstreamServer struct {
 	host               string
 	plaintext          bool
 	insecureSkipVerify bool
 
 	reflectionClient *grpcreflect.Client
+	httpClient       *http.Client
 }
 
 type upstreamService struct {
-	servers []*serverInfo
+	servers []*upstreamServer
 	next    atomic.Uint32
 }
 
 type proxy struct {
-	upstreams []*serverInfo
+	upstreams []*upstreamServer
 
 	reflectionResolver *reflection.SimpleResolver
 
@@ -96,7 +96,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // findServer finds a server implementing the specified service using round robin load balancing.
-func (p *proxy) findServer(serviceName string) (*serverInfo, bool) {
+func (p *proxy) findServer(serviceName string) (*upstreamServer, bool) {
 	p.servicesMutex.RLock()
 	defer p.servicesMutex.RUnlock()
 
@@ -122,15 +122,7 @@ func (p *proxy) getTargetService(r *http.Request) (name string, ok bool) {
 }
 
 // forwardRequest forwards an incoming gRPC request to the specified server.
-func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server *serverInfo) {
-	client := &http.Client{
-		Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-
+func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server *upstreamServer) {
 	req.URL.Host = server.host
 	req.Host = server.host
 	req.RequestURI = ""
@@ -141,7 +133,7 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 		req.URL.Scheme = "https"
 	}
 
-	response, err := client.Do(req)
+	response, err := server.httpClient.Do(req)
 	if err != nil {
 		p.logger.Debug("Failed to start request", zap.Error(err))
 		return
@@ -178,7 +170,7 @@ func writeGrpcStatus(w http.ResponseWriter, code codes.Code, msg string) {
 	w.Header().Add("Grpc-Message", msg)
 }
 
-func (server *serverInfo) dialOptions() []grpc.DialOption {
+func (server *upstreamServer) dialOptions() []grpc.DialOption {
 	if server.plaintext {
 		return []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),

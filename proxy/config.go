@@ -1,11 +1,14 @@
 package proxy
 
 import (
+	"crypto/tls"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/natk64/pancake-proxy/reflection"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
@@ -49,14 +52,25 @@ func NewServer(config ServerConfig) *proxy {
 	return p
 }
 
-func upstreamConfig(upstreams []UpstreamConfig) []*serverInfo {
-	servers := make([]*serverInfo, len(upstreams))
+func upstreamConfig(upstreams []UpstreamConfig) []*upstreamServer {
+	servers := make([]*upstreamServer, len(upstreams))
 	for i, config := range upstreams {
-		servers[i] = &serverInfo{
-			host:               config.Address,
-			plaintext:          config.Plaintext,
-			insecureSkipVerify: config.InsecureSkipVerify,
-		}
+		servers[i] = makeServer(&config)
 	}
 	return servers
+}
+
+func makeServer(config *UpstreamConfig) *upstreamServer {
+	return &upstreamServer{
+		host:               config.Address,
+		plaintext:          config.Plaintext,
+		insecureSkipVerify: config.InsecureSkipVerify,
+		httpClient: &http.Client{
+			Transport: &http2.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: config.InsecureSkipVerify,
+				},
+			},
+		},
+	}
 }

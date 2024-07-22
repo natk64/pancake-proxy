@@ -12,7 +12,7 @@ import (
 
 // reflectClient returns the grpc reflection client for the server.
 // If no client is connected, a new one is created.
-func (srv *serverInfo) reflectClient() (*grpcreflect.Client, error) {
+func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
 	if srv.reflectionClient != nil {
 		return srv.reflectionClient, nil
 	}
@@ -30,7 +30,7 @@ func (srv *serverInfo) reflectClient() (*grpcreflect.Client, error) {
 // updateServices updates the list of upstream servers and resolves the services they provide.
 func (p *proxy) updateServices() {
 	type result struct {
-		server          *serverInfo
+		server          *upstreamServer
 		services        []string
 		fileDescriptors []protoreflect.FileDescriptor
 	}
@@ -44,7 +44,7 @@ func (p *proxy) updateServices() {
 	p.logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
 
 	for _, server := range upstreams {
-		go func(server *serverInfo) {
+		go func(server *upstreamServer) {
 			defer wg.Done()
 
 			logger := p.logger.With(zap.String("target_host", server.host))
