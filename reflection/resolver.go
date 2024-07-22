@@ -95,6 +95,7 @@ func (cr *SimpleResolver) registerFileLocked(fd protoreflect.FileDescriptor) {
 	cr.files.RegisterFile(fd)
 	extensions := fd.Extensions()
 	messages := fd.Messages()
+	imports := fd.Imports()
 
 	for i := 0; i < messages.Len(); i++ {
 		name := messages.Get(i).FullName()
@@ -112,5 +113,14 @@ func (cr *SimpleResolver) registerFileLocked(fd protoreflect.FileDescriptor) {
 		}
 
 		mapEntry[extension.Number()] = extension
+	}
+
+	for i := 0; i < imports.Len(); i++ {
+		imported := imports.Get(i)
+		if imported.IsPlaceholder() {
+			continue
+		}
+
+		cr.registerFileLocked(imported)
 	}
 }
