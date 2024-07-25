@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/grpcweb"
 	"github.com/natk64/pancake-proxy/reflection"
 	"github.com/natk64/pancake-proxy/utils"
 	"go.uber.org/zap"
@@ -71,13 +72,23 @@ func (p *proxy) RunProxy(ctx context.Context) error {
 }
 
 // ServeHTTP implements the http.Handler interface.
-// This method is the entrypoint for all requests into proxy.
+// This method is the entrypoint for all requests into the proxy.
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	serviceName, ok := p.getTargetService(r)
 	if !ok {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, "malformed request url")
 		return
+	}
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, grpcweb.ContentTypeGrpcWeb) {
+		w, r = grpcweb.WrapRequest(w, r)
 	}
 
 	w.Header().Set("Trailer", "Grpc-Status, Grpc-Message")
@@ -160,6 +171,10 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
+	}
+
+	if f, ok := w.(grpcweb.Finisher); ok {
+		f.Finish()
 	}
 }
 

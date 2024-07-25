@@ -28,3 +28,9 @@ For example, if you have two servers, one implementing ServiceA, the other Servi
 Pancake will report ["ServiceA", "ServiceB", ...]
 
 To clients it would look like they're talking to a single server, implementing both services.
+
+## gRPC-Web support
+
+Pancake translates and forwards incoming gRPC-Web requests (Content-Type: grpc-web*) to the upstream servers.
+This feature is enabled by default and is usable using the default configuration,
+although CORS will need to configured to accept requests from browsers.

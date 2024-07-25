@@ -32,6 +32,7 @@ require (
 
 require (
 	github.com/jhump/protoreflect v1.16.0
+	github.com/rs/cors v1.11.0
 	github.com/spf13/viper v1.19.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/text v0.16.0 // indirect

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/natk64/pancake-proxy/proxy"
+	"github.com/rs/cors"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -45,8 +46,21 @@ func main() {
 		panic(err)
 	}()
 
+	var handler http.Handler
+	if viper.GetBool("cors.enabled") {
+		cors := cors.New(cors.Options{
+			AllowedOrigins: viper.GetStringSlice("cors.allowedOrigins"),
+			AllowedMethods: []string{"POST", "OPTIONS"},
+			AllowedHeaders: []string{"Content-Type", "Grpc-Timeout", "X-Grpc-Web", "X-User-Agent"},
+			ExposedHeaders: []string{"Grpc-Status", "Grpc-Message"},
+		})
+		handler = cors.Handler(srv)
+	} else {
+		handler = srv
+	}
+
 	addr := viper.GetString("bindAddress")
 	log.Printf("Starting proxy on %s\n", addr)
-	err := http.ListenAndServeTLS(addr, "server.crt", "server.key", srv)
+	err := http.ListenAndServeTLS(addr, "server.crt", "server.key", handler)
 	log.Fatalln(err)
 }
