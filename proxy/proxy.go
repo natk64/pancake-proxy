@@ -104,6 +104,10 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.forwardRequest(r, w, server)
+
+	if f, ok := w.(grpcweb.Finisher); ok {
+		f.Finish()
+	}
 }
 
 // findServer finds a server implementing the specified service using round robin load balancing.
@@ -171,10 +175,6 @@ func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server 
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
-	}
-
-	if f, ok := w.(grpcweb.Finisher); ok {
-		f.Finish()
 	}
 }
 
