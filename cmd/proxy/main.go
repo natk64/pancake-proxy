@@ -16,6 +16,7 @@ import (
 func main() {
 	viper.SetDefault("bindAddress", ":8080")
 	viper.SetDefault("serviceUpdateInterval", time.Second*30)
+	viper.SetDefault("cors.allowedHeaders", []string{"*"})
 
 	viper.AddConfigPath("/etc/pancake")
 	viper.AddConfigPath(".")
@@ -51,7 +52,7 @@ func main() {
 		cors := cors.New(cors.Options{
 			AllowedOrigins: viper.GetStringSlice("cors.allowedOrigins"),
 			AllowedMethods: []string{"POST", "OPTIONS"},
-			AllowedHeaders: []string{"Content-Type", "Grpc-Timeout", "X-Grpc-Web", "X-User-Agent"},
+			AllowedHeaders: viper.GetStringSlice("cors.allowedHeaders"),
 			ExposedHeaders: []string{"Grpc-Status", "Grpc-Message"},
 		})
 		handler = cors.Handler(srv)
