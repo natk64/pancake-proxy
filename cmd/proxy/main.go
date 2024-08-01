@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +16,9 @@ func main() {
 	viper.SetDefault("bindAddress", ":8080")
 	viper.SetDefault("serviceUpdateInterval", time.Second*30)
 	viper.SetDefault("cors.allowedHeaders", []string{"*"})
+	viper.SetDefault("tls.enabled", true)
+	viper.SetDefault("tls.cert_file", "/etc/pancake/server.crt")
+	viper.SetDefault("tls.key_file", "/etc/pancake/server.key")
 
 	viper.AddConfigPath("/etc/pancake")
 	viper.AddConfigPath(".")
@@ -36,7 +38,7 @@ func main() {
 
 	var config proxy.ServerConfig
 	if err := viper.Unmarshal(&config); err != nil {
-		log.Fatalln("Failed to unmarshal config", err)
+		logger.Fatal("Failed to unmarshal config", zap.Error(err))
 	}
 
 	config.Logger = logger.Named("server")
@@ -61,7 +63,13 @@ func main() {
 	}
 
 	addr := viper.GetString("bindAddress")
-	log.Printf("Starting proxy on %s\n", addr)
-	err := http.ListenAndServeTLS(addr, "server.crt", "server.key", handler)
-	log.Fatalln(err)
+	logger.Info("Starting proxy", zap.String("address", addr))
+
+	var err error
+	if viper.GetBool("tls.enabled") {
+		err = http.ListenAndServeTLS(addr, viper.GetString("tls.cert_file"), viper.GetString("tls.key_file"), handler)
+	} else {
+		err = http.ListenAndServe(addr, handler)
+	}
+	logger.Fatal("Server stopped", zap.Error(err))
 }
