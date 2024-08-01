@@ -2,9 +2,12 @@ package grpcweb
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"net/http"
 	"strings"
+
+	"github.com/natk64/pancake-proxy/utils"
 )
 
 const (
@@ -18,13 +21,21 @@ type Finisher interface {
 }
 
 func WrapRequest(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+	baseContentType := ContentTypeGrpcWeb
+
+	if strings.HasPrefix(contentType, ContentTypeGrpcWebText) {
+		r.Body = utils.CombineReaderCloser(base64.NewDecoder(base64.StdEncoding, r.Body), r.Body)
+		w = utils.Base64ResponseWriter(w)
+		baseContentType = ContentTypeGrpcWebText
+	}
+
+	// Replace just part of the content type, to make sure the message format is retained.
+	r.Header.Set("Content-Type", strings.Replace(contentType, baseContentType, ContentTypeGrpc, 1))
+	r.Header.Del("Content-Length")
+	r.ContentLength = -1
 	r.ProtoMajor = 2
 	r.ProtoMinor = 0
-
-	contentType := r.Header.Get("Content-Type")
-	// Replace just part of the content type, to make sure the message format is retained.
-	r.Header.Set("Content-Type", strings.Replace(contentType, ContentTypeGrpcWeb, ContentTypeGrpc, 1))
-	r.Header.Del("Content-Length")
 
 	w = &grpcWebResponseWriter{
 		inner:           w,
