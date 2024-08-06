@@ -35,16 +35,15 @@ func (p *proxy) updateServices() {
 		fileDescriptors []protoreflect.FileDescriptor
 	}
 
-	var results []result
-
 	upstreams := p.upstreams
+	results := make([]result, len(upstreams))
 	wg := sync.WaitGroup{}
 	wg.Add(len(upstreams))
 
 	p.logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
 
-	for _, server := range upstreams {
-		go func(server *upstreamServer) {
+	for i, server := range upstreams {
+		go func(i int, server *upstreamServer) {
 			defer wg.Done()
 
 			logger := p.logger.With(zap.String("target_host", server.host))
@@ -71,12 +70,12 @@ func (p *proxy) updateServices() {
 				fds = append(fds, fd.UnwrapFile())
 			}
 
-			results = append(results, result{
+			results[i] = result{
 				server:          server,
 				services:        services,
 				fileDescriptors: fds,
-			})
-		}(server)
+			}
+		}(i, server)
 	}
 
 	wg.Wait()
