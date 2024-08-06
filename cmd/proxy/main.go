@@ -11,9 +11,14 @@ import (
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+
+	"net/http/pprof"
 )
 
 func main() {
+	// Reset default serve mux to remove default pprof routes
+	http.DefaultServeMux = http.NewServeMux()
+
 	viper.AddConfigPath("/etc/pancake")
 	viper.AddConfigPath(".")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -51,6 +56,8 @@ func main() {
 		panic(err)
 	}()
 
+	go runPprofListener(logger.Named("pprof_server"))
+
 	var handler http.Handler
 	if viper.GetBool("cors.enabled") {
 		cors := cors.New(cors.Options{
@@ -74,4 +81,22 @@ func main() {
 		err = http.ListenAndServe(addr, handler)
 	}
 	logger.Fatal("Server stopped", zap.Error(err))
+}
+
+func runPprofListener(logger *zap.Logger) {
+	pprofServeMux := http.NewServeMux()
+	pprofServeMux.HandleFunc("/debug/pprof/", pprof.Index)
+	pprofServeMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	pprofServeMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	pprofServeMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	pprofServeMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	srv := &http.Server{
+		Handler: pprofServeMux,
+		Addr:    "localhost:6060",
+	}
+
+	logger.Info("Starting pprof server", zap.String("address", srv.Addr))
+	err := srv.ListenAndServe()
+	logger.Error("pprof server stopped", zap.Error(err))
 }
