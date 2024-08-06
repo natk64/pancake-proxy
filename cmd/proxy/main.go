@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,19 +14,20 @@ import (
 )
 
 func main() {
-	viper.SetDefault("bindAddress", ":8080")
-	viper.SetDefault("serviceUpdateInterval", time.Second*30)
-	viper.SetDefault("cors.allowedHeaders", []string{"*"})
-	viper.SetDefault("tls.enabled", true)
-	viper.SetDefault("tls.cert_file", "/etc/pancake/server.crt")
-	viper.SetDefault("tls.key_file", "/etc/pancake/server.key")
-
 	viper.AddConfigPath("/etc/pancake")
 	viper.AddConfigPath(".")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.SetEnvPrefix("pancake")
 	viper.AutomaticEnv()
 	viper.ReadInConfig()
+
+	configDir := filepath.Dir(viper.ConfigFileUsed())
+	viper.SetDefault("bindAddress", ":8080")
+	viper.SetDefault("serviceUpdateInterval", time.Second*30)
+	viper.SetDefault("cors.allowedHeaders", []string{"*"})
+	viper.SetDefault("tls.enabled", true)
+	viper.SetDefault("tls.certFile", filepath.Join(configDir, "server.crt"))
+	viper.SetDefault("tls.keyFile", filepath.Join(configDir, "server.key"))
 
 	var logger *zap.Logger
 	if viper.GetBool("logger.development") {
@@ -67,7 +69,7 @@ func main() {
 
 	var err error
 	if viper.GetBool("tls.enabled") {
-		err = http.ListenAndServeTLS(addr, viper.GetString("tls.cert_file"), viper.GetString("tls.key_file"), handler)
+		err = http.ListenAndServeTLS(addr, viper.GetString("tls.certFile"), viper.GetString("tls.keyFile"), handler)
 	} else {
 		err = http.ListenAndServe(addr, handler)
 	}
