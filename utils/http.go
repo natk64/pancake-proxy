@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"compress/gzip"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -76,5 +77,38 @@ func Base64ResponseWriter(w http.ResponseWriter) ResponseWriterFlusher {
 	return &base64ResponseWriter{
 		inner:          w,
 		currentEncoder: base64.NewEncoder(base64.RawStdEncoding, w),
+	}
+}
+
+type gzipResponseWriter struct {
+	inner   http.ResponseWriter
+	encoder *gzip.Writer
+}
+
+func (b *gzipResponseWriter) Header() http.Header {
+	return b.inner.Header()
+}
+
+func (b *gzipResponseWriter) Write(data []byte) (int, error) {
+	return b.encoder.Write(data)
+}
+
+func (b *gzipResponseWriter) WriteHeader(statusCode int) {
+	b.inner.WriteHeader(statusCode)
+}
+
+func (b *gzipResponseWriter) Flush() {
+	b.encoder.Flush()
+	if f, ok := b.inner.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// GzipResponseWriter wraps an http.ResponseWriter that compresses data using gzip.
+// The returned flusher implements http.Flusher.
+func GzipResponseWriter(w http.ResponseWriter) ResponseWriterFlusher {
+	return &gzipResponseWriter{
+		inner:   w,
+		encoder: gzip.NewWriter(w),
 	}
 }

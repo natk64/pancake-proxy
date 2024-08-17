@@ -30,6 +30,12 @@ func WrapRequest(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *
 		baseContentType = ContentTypeGrpcWebText
 	}
 
+	header := make(http.Header)
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		header.Set("Content-Encoding", "gzip")
+		w = utils.GzipResponseWriter(w)
+	}
+
 	// Replace just part of the content type, to make sure the message format is retained.
 	r.Header.Set("Content-Type", strings.Replace(contentType, baseContentType, ContentTypeGrpc, 1))
 	r.Header.Del("Content-Length")
@@ -39,8 +45,8 @@ func WrapRequest(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *
 
 	w = &grpcWebResponseWriter{
 		inner:           w,
-		headers:         make(http.Header),
-		baseContentType: ContentTypeGrpcWeb,
+		headers:         header,
+		baseContentType: baseContentType,
 	}
 
 	return w, r
@@ -130,4 +136,5 @@ func (g *grpcWebResponseWriter) Finish() {
 	binary.BigEndian.PutUint32(frameHeader[1:], uint32(buf.Len()))
 	g.inner.Write(frameHeader)
 	g.inner.Write(buf.Bytes())
+	g.Flush()
 }
