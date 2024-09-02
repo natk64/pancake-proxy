@@ -22,7 +22,7 @@ const (
 
 // handleReflection check if the requested service is the reflection service and handles it, if it is.
 // It returns true if the request was handled or false if the caller should handle the request.
-func (p *proxy) handleReflection(w http.ResponseWriter, r *http.Request, service string) bool {
+func (p *Proxy) handleReflection(w http.ResponseWriter, r *http.Request, service string) bool {
 	if service != reflectionV1Service && service != reflectionV1alphaService {
 		return false
 	}
@@ -38,7 +38,7 @@ func (p *proxy) handleReflection(w http.ResponseWriter, r *http.Request, service
 }
 
 // ServerReflectionInfo implements grpc_reflection_v1.ServerReflectionServer.
-func (p *proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_ServerReflectionInfoServer) error {
+func (p *Proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_ServerReflectionInfoServer) error {
 	handler := newReflectionHandler(p)
 
 	for {
@@ -141,11 +141,11 @@ func (p *proxy) ServerReflectionInfo(stream grpc_reflection_v1.ServerReflection_
 
 type reflectionHandler struct {
 	sentFileDescriptors map[string]bool
-	proxy               *proxy
+	proxy               *Proxy
 	resolver            reflection.FileExtensionResolver
 }
 
-func newReflectionHandler(proxy *proxy) *reflectionHandler {
+func newReflectionHandler(proxy *Proxy) *reflectionHandler {
 	return &reflectionHandler{
 		sentFileDescriptors: make(map[string]bool),
 		proxy:               proxy,

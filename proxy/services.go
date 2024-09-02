@@ -3,12 +3,18 @@ package proxy
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/jhump/protoreflect/grpcreflect"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+type upstreamService struct {
+	servers []*upstreamServer
+	next    atomic.Uint32
+}
 
 // reflectClient returns the grpc reflection client for the server.
 // If no client is connected, a new one is created.
@@ -17,7 +23,7 @@ func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
 		return srv.reflectionClient, nil
 	}
 
-	conn, err := grpc.NewClient(srv.host, srv.dialOptions()...)
+	conn, err := grpc.NewClient(srv.config.Address, srv.dialOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -27,26 +33,29 @@ func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
 	return client, nil
 }
 
-// updateServices updates the list of upstream servers and resolves the services they provide.
-func (p *proxy) updateServices() {
+// updateServices checks all upstream server of a specific provider and resolves the services they expose.
+func (p *Proxy) UpdateServices(provider string) {
 	type result struct {
 		server          *upstreamServer
 		services        []string
 		fileDescriptors []protoreflect.FileDescriptor
 	}
 
-	upstreams := p.upstreams
+	p.serverMutex.RLock()
+	upstreams := p.servers[provider]
+	p.serverMutex.RUnlock()
 	results := make([]result, len(upstreams))
 	wg := sync.WaitGroup{}
 	wg.Add(len(upstreams))
 
-	p.logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
+	logger := p.logger.With(zap.String("provider", provider))
+	logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
 
 	for i, server := range upstreams {
 		go func(i int, server *upstreamServer) {
 			defer wg.Done()
 
-			logger := p.logger.With(zap.String("target_host", server.host))
+			logger := logger.With(zap.String("target_host", server.config.Address))
 			client, err := server.reflectClient()
 			if err != nil {
 				logger.Error("Failed to create reflection client", zap.Error(err))
@@ -83,8 +92,14 @@ func (p *proxy) updateServices() {
 	p.servicesMutex.Lock()
 	defer p.servicesMutex.Unlock()
 
-	for k := range p.services {
-		delete(p.services, k)
+	for _, service := range p.services {
+		var filtered []*upstreamServer
+		for _, server := range service.servers {
+			if server.provider != provider {
+				filtered = append(filtered, server)
+			}
+		}
+		service.servers = filtered
 	}
 
 	for _, result := range results {
@@ -96,11 +111,10 @@ func (p *proxy) updateServices() {
 			}
 
 			if err := p.reflectionResolver.RegisterFiles(result.fileDescriptors); err != nil {
-				p.logger.Error("Failed to register proto files for server", zap.Error(err), zap.String("target_host", result.server.host))
+				p.logger.Error("Failed to register proto files for server", zap.Error(err), zap.String("target_host", result.server.config.Address))
 			}
 
 			service.servers = append(service.servers, result.server)
 		}
-
 	}
 }
