@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/natk64/pancake-proxy/providers"
 	"github.com/natk64/pancake-proxy/proxy"
+	"github.com/natk64/pancake-proxy/utils"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -33,6 +35,8 @@ func main() {
 	viper.SetDefault("tls.enabled", true)
 	viper.SetDefault("tls.certFile", filepath.Join(configDir, "server.crt"))
 	viper.SetDefault("tls.keyFile", filepath.Join(configDir, "server.key"))
+	viper.SetDefault("pprof.enabled", true)
+	viper.SetDefault("docker.enabled", true)
 
 	var logger *zap.Logger
 	if viper.GetBool("logger.development") {
@@ -43,20 +47,49 @@ func main() {
 
 	zap.ReplaceGlobals(logger.Named("global"))
 
-	var config proxy.ServerConfig
-	if err := viper.Unmarshal(&config); err != nil {
-		logger.Fatal("Failed to unmarshal config", zap.Error(err))
+	ctx := context.Background()
+	staticProvider := providers.Static{
+		ServiceUpdateInterval: viper.GetDuration("serviceUpdateInterval"),
+		Servers:               getStaticServers(logger),
 	}
 
-	config.Logger = logger.Named("server")
-	srv := proxy.NewServer(config)
+	dockerProvider := providers.Docker{
+		ExposeMode:      providers.ExposeMode(viper.GetString("docker.expose")),
+		Label:           viper.GetString("docker.label"),
+		DockerHost:      viper.GetString("docker.host"),
+		ExposedProjects: viper.GetStringSlice("docker.exposedProjects"),
+		DefaultNetwork:  viper.GetString("docker.network"),
+		Logger:          logger.Named("docker_provider"),
+	}
 
-	go func() {
-		err := srv.RunProxy(context.Background())
-		panic(err)
-	}()
+	srv := proxy.NewServer(proxy.ProxyConfig{
+		DisableReflection: viper.GetBool("disableReflection"),
+		Logger:            logger.Named("server"),
+	})
 
-	go runPprofListener(logger.Named("pprof_server"))
+	go utils.AutoRestarter{
+		Name:   "Static provider",
+		Delay:  time.Second * 10,
+		Logger: logger,
+		F: func(ctx context.Context) error {
+			return staticProvider.Run(ctx, srv)
+		},
+	}.Run(ctx)
+
+	if viper.GetBool("docker.enabled") {
+		go utils.AutoRestarter{
+			Name:   "Docker provider",
+			Delay:  time.Second * 10,
+			Logger: logger,
+			F: func(ctx context.Context) error {
+				return dockerProvider.Run(ctx, srv)
+			},
+		}.Run(ctx)
+	}
+
+	if viper.GetBool("pprof.enabled") {
+		go runPprofListener(logger.Named("pprof_server"))
+	}
 
 	var handler http.Handler
 	if viper.GetBool("cors.enabled") {
@@ -99,4 +132,16 @@ func runPprofListener(logger *zap.Logger) {
 	logger.Info("Starting pprof server", zap.String("address", srv.Addr))
 	err := srv.ListenAndServe()
 	logger.Error("pprof server stopped", zap.Error(err))
+}
+
+func getStaticServers(logger *zap.Logger) []proxy.UpstreamConfig {
+	type config struct {
+		Servers []proxy.UpstreamConfig `mapstructure:"servers"`
+	}
+
+	var conf config
+	if err := viper.Unmarshal(&conf); err != nil {
+		logger.Fatal("Failed to load static server config", zap.Error(err))
+	}
+	return conf.Servers
 }

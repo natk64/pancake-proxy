@@ -1,44 +1,34 @@
 package proxy
 
 import (
-	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"time"
 
-	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/natk64/pancake-proxy/grpcweb"
 	"github.com/natk64/pancake-proxy/reflection"
 	"github.com/natk64/pancake-proxy/utils"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/reflection/grpc_reflection_v1"
+	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 )
 
-type upstreamServer struct {
-	host               string
-	plaintext          bool
-	insecureSkipVerify bool
+type ProxyConfig struct {
+	// DisableReflection will not expose the reflection service
+	DisableReflection bool `mapstructure:"disableReflection"`
 
-	reflectionClient *grpcreflect.Client
-	httpClient       *http.Client
+	Logger *zap.Logger
 }
 
-type upstreamService struct {
-	servers []*upstreamServer
-	next    atomic.Uint32
-}
-
-type proxy struct {
-	upstreams []*upstreamServer
+// Proxy must be created using [NewProxy]
+type Proxy struct {
+	servers     map[string][]*upstreamServer
+	serverMutex *sync.RWMutex
 
 	reflectionResolver *reflection.SimpleResolver
 
@@ -48,32 +38,34 @@ type proxy struct {
 	internalServer *grpc.Server
 	logger         *zap.Logger
 
-	serviceUpdateInterval    time.Duration
 	disableReflectionService bool
 }
 
-// RunBackgroundLoop MUST be called before the first request can be served.
-// The function will block until the context is cancelled.
-// This function will always return a non nil error.
-func (p *proxy) RunProxy(ctx context.Context) error {
-	ticker := time.NewTicker(p.serviceUpdateInterval)
-	defer ticker.Stop()
-
-	p.updateServices()
-
-	for {
-		select {
-		case <-ticker.C:
-			p.updateServices()
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+func NewServer(config ProxyConfig) *Proxy {
+	p := &Proxy{
+		reflectionResolver:       &reflection.SimpleResolver{},
+		services:                 make(map[string]*upstreamService),
+		servicesMutex:            &sync.RWMutex{},
+		servers:                  make(map[string][]*upstreamServer),
+		serverMutex:              &sync.RWMutex{},
+		internalServer:           grpc.NewServer(),
+		logger:                   config.Logger,
+		disableReflectionService: config.DisableReflection,
 	}
+
+	if p.logger == nil {
+		p.logger = zap.NewNop()
+	}
+
+	grpc_reflection_v1.RegisterServerReflectionServer(p.internalServer, p)
+	grpc_reflection_v1alpha.RegisterServerReflectionServer(p.internalServer, reflection.AlphaConverter{Inner: p})
+
+	return p
 }
 
 // ServeHTTP implements the http.Handler interface.
 // This method is the entrypoint for all requests into the proxy.
-func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -111,7 +103,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // findServer finds a server implementing the specified service using round robin load balancing.
-func (p *proxy) findServer(serviceName string) (*upstreamServer, bool) {
+func (p *Proxy) findServer(serviceName string) (*upstreamServer, bool) {
 	p.servicesMutex.RLock()
 	defer p.servicesMutex.RUnlock()
 
@@ -126,7 +118,7 @@ func (p *proxy) findServer(serviceName string) (*upstreamServer, bool) {
 }
 
 // getTargetService returns the name of the service this request is targeting.
-func (p *proxy) getTargetService(r *http.Request) (name string, ok bool) {
+func (p *Proxy) getTargetService(r *http.Request) (name string, ok bool) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	split := strings.SplitN(path, "/", 2)
 	if len(split) != 2 {
@@ -137,12 +129,12 @@ func (p *proxy) getTargetService(r *http.Request) (name string, ok bool) {
 }
 
 // forwardRequest forwards an incoming gRPC request to the specified server.
-func (p *proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server *upstreamServer) {
-	req.URL.Host = server.host
-	req.Host = server.host
+func (p *Proxy) forwardRequest(req *http.Request, w http.ResponseWriter, server *upstreamServer) {
+	req.URL.Host = server.config.Address
+	req.Host = server.config.Address
 	req.RequestURI = ""
 
-	if server.plaintext {
+	if server.config.Plaintext {
 		req.URL.Scheme = "http"
 	} else {
 		req.URL.Scheme = "https"
@@ -183,16 +175,4 @@ func writeGrpcStatus(w http.ResponseWriter, code codes.Code, msg string) {
 	w.WriteHeader(200)
 	w.Header().Add("Grpc-Status", strconv.Itoa(int(code)))
 	w.Header().Add("Grpc-Message", msg)
-}
-
-func (server *upstreamServer) dialOptions() []grpc.DialOption {
-	if server.plaintext {
-		return []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		}
-	}
-
-	return []grpc.DialOption{
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: server.insecureSkipVerify})),
-	}
 }

@@ -7,6 +7,7 @@ import (
 
 var _ grpc_reflection_v1alpha.ServerReflectionServer = &AlphaConverter{}
 
+// AlphaConverter makes a V1 gRPC reflection server implementation backwards compatible with V1alpha.
 type AlphaConverter struct {
 	Inner grpc_reflection_v1.ServerReflectionServer
 }
