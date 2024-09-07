@@ -35,6 +35,8 @@ func main() {
 	viper.SetDefault("tls.enabled", true)
 	viper.SetDefault("tls.certFile", filepath.Join(configDir, "server.crt"))
 	viper.SetDefault("tls.keyFile", filepath.Join(configDir, "server.key"))
+	viper.SetDefault("pprof.enabled", true)
+	viper.SetDefault("docker.enabled", true)
 
 	var logger *zap.Logger
 	if viper.GetBool("logger.development") {
@@ -74,16 +76,20 @@ func main() {
 		},
 	}.Run(ctx)
 
-	go utils.AutoRestarter{
-		Name:   "Docker provider",
-		Delay:  time.Second * 10,
-		Logger: logger,
-		F: func(ctx context.Context) error {
-			return dockerProvider.Run(ctx, srv)
-		},
-	}.Run(ctx)
+	if viper.GetBool("docker.enabled") {
+		go utils.AutoRestarter{
+			Name:   "Docker provider",
+			Delay:  time.Second * 10,
+			Logger: logger,
+			F: func(ctx context.Context) error {
+				return dockerProvider.Run(ctx, srv)
+			},
+		}.Run(ctx)
+	}
 
-	go runPprofListener(logger.Named("pprof_server"))
+	if viper.GetBool("pprof.enabled") {
+		go runPprofListener(logger.Named("pprof_server"))
+	}
 
 	var handler http.Handler
 	if viper.GetBool("cors.enabled") {

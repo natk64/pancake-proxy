@@ -241,11 +241,15 @@ func (prov *Docker) getPort(container *types.Container) (string, error) {
 		return port, nil
 	}
 
-	if len(container.Ports) != 1 {
-		return "", fmt.Errorf("cannot determine port, found %d expected 1", len(container.Ports))
+	if len(container.Ports) == 0 {
+		return "", fmt.Errorf("no exposed ports found")
 	}
 
-	return strconv.Itoa(int(container.Ports[0].PrivatePort)), nil
+	minPort := slices.MinFunc(container.Ports, func(a, b types.Port) int {
+		return int(a.PrivatePort) - int(b.PrivatePort)
+	})
+
+	return strconv.Itoa(int(minPort.PrivatePort)), nil
 }
 
 func (prov *Docker) getIpAddress(container *types.Container) (string, error) {

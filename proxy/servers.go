@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 
 	"github.com/jhump/protoreflect/grpcreflect"
@@ -27,15 +29,28 @@ type upstreamServer struct {
 }
 
 func newUpstream(provider string, config UpstreamConfig) *upstreamServer {
+	var transport http.RoundTripper
+	if config.Plaintext {
+		transport = &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			},
+		}
+	} else {
+		transport = &http2.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: config.InsecureSkipVerify,
+			},
+		}
+	}
+
 	return &upstreamServer{
 		config:   config,
 		provider: provider,
 		httpClient: &http.Client{
-			Transport: &http2.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: config.InsecureSkipVerify,
-				},
-			},
+			Transport: transport,
 		},
 	}
 }
