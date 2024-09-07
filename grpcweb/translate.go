@@ -16,10 +16,19 @@ const (
 	ContentTypeGrpcWebText = "application/grpc-web-text"
 )
 
+// Finisher is implemented by [http.ResponseWriters] that need to run code when a request is completed.
+//
+// A handler that received a response writer that implements Finisher should defer
+// a call to Finish, to make sure it always gets called.
 type Finisher interface {
 	Finish()
 }
 
+// WrapRequest wraps an incoming gRPC-Web request and its ResponseWriter,
+// so that it looks like a regular gRPC request to a handler function.
+//
+// The only difference for the handler is that it has to use the [Finisher] interface
+// implemented on the wrapped ResponseWriter, once the request is completed.
 func WrapRequest(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	baseContentType := ContentTypeGrpcWeb
