@@ -2,7 +2,7 @@
 
 Pancake is a smart gRPC reverse proxy or API gateway, allowing many microservices to be exposed as a single server.
 
-[Docker Hub](https://hub.docker.com/repository/docker/natk64/pancake)
+[Docker Hub](https://hub.docker.com/r/natk64/pancake)
 
 ## How it works
 
