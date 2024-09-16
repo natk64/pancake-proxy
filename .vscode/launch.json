@@ -11,7 +11,8 @@
             "mode": "auto",
             "program": "cmd/proxy",
             "env": {
-                "PANCAKE_LOGGER_DEVELOPMENT": "true"
+                "PANCAKE_LOGGER_DEVELOPMENT": "true",
+                "PANCAKE_UPDATE_INTERVAL": "5s"
             }
         }
     ]

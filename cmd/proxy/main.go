@@ -35,8 +35,8 @@ func main() {
 	viper.SetDefault("tls.enabled", true)
 	viper.SetDefault("tls.certFile", filepath.Join(configDir, "server.crt"))
 	viper.SetDefault("tls.keyFile", filepath.Join(configDir, "server.key"))
-	viper.SetDefault("pprof.enabled", true)
-	viper.SetDefault("docker.enabled", true)
+	viper.SetDefault("pprof.enabled", false)
+	viper.SetDefault("docker.enabled", false)
 
 	var logger *zap.Logger
 	if viper.GetBool("logger.development") {
