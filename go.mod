@@ -10,7 +10,7 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect
-	github.com/bufbuild/protocompile v0.10.0 // indirect
+	github.com/bufbuild/protocompile v0.14.1 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
@@ -54,7 +54,7 @@ require (
 )
 
 require (
-	github.com/jhump/protoreflect v1.16.0
+	github.com/jhump/protoreflect v1.17.0
 	github.com/rs/cors v1.11.0
 	github.com/spf13/viper v1.19.0
 	go.uber.org/zap v1.27.0
