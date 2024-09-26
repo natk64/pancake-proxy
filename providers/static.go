@@ -29,22 +29,7 @@ func (prov Static) Run(ctx context.Context, target *proxy.Proxy) error {
 		prov.Name = "static"
 	}
 
-	if prov.ServiceUpdateInterval == 0 {
-		prov.ServiceUpdateInterval = time.Second * 30
-	}
-
 	target.ReplaceServers(prov.Name, prov.Servers)
-	target.UpdateServices(prov.Name)
-
-	ticker := time.NewTicker(prov.ServiceUpdateInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			target.UpdateServices(prov.Name)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
+	<-ctx.Done()
+	return ctx.Err()
 }

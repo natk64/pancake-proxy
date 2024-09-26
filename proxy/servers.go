@@ -6,7 +6,8 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/reflection"
+	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -24,11 +25,13 @@ type upstreamServer struct {
 	config   UpstreamConfig
 	provider string
 
-	reflectionClient *grpcreflect.Client
-	httpClient       *http.Client
+	stopServiceWatcher func()
+	reflectionClient   *reflection.ReflectionClient
+	httpClient         *http.Client
+	logger             *zap.Logger
 }
 
-func newUpstream(provider string, config UpstreamConfig) *upstreamServer {
+func newUpstream(provider string, config UpstreamConfig, logger *zap.Logger) *upstreamServer {
 	var transport http.RoundTripper
 	if config.Plaintext {
 		transport = &http2.Transport{
@@ -49,6 +52,7 @@ func newUpstream(provider string, config UpstreamConfig) *upstreamServer {
 	return &upstreamServer{
 		config:   config,
 		provider: provider,
+		logger:   logger,
 		httpClient: &http.Client{
 			Transport: transport,
 		},
@@ -83,12 +87,16 @@ func (p *Proxy) ReplaceServers(provider string, newConfigs []UpstreamConfig) {
 		if _, ok := shouldBuildConfigs[server.config]; ok {
 			newServers = append(newServers, server)
 			shouldBuildConfigs[server.config] = false
+		} else {
+			server.stopWatchingServices()
 		}
 	}
 
 	for config, shouldBuild := range shouldBuildConfigs {
 		if shouldBuild {
-			newServers = append(newServers, newUpstream(provider, config))
+			server := newUpstream(provider, config, p.logger.Named("upstream").With(zap.String("upstream_host", config.Address)))
+			go server.watchServices(context.Background(), p)
+			newServers = append(newServers, server)
 		}
 	}
 

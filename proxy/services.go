@@ -2,10 +2,10 @@ package proxy
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
+	"time"
 
-	"github.com/jhump/protoreflect/grpcreflect"
+	"github.com/natk64/pancake-proxy/reflection"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -18,76 +18,74 @@ type upstreamService struct {
 
 // reflectClient returns the grpc reflection client for the server.
 // If no client is connected, a new one is created.
-func (srv *upstreamServer) reflectClient() (*grpcreflect.Client, error) {
+func (srv *upstreamServer) reflectClient() (*reflection.ReflectionClient, error) {
 	if srv.reflectionClient != nil {
 		return srv.reflectionClient, nil
 	}
 
+	srv.logger.Debug("Creating new reflection client")
 	conn, err := grpc.NewClient(srv.config.Address, srv.dialOptions()...)
 	if err != nil {
 		return nil, err
 	}
 
-	client := grpcreflect.NewClientAuto(context.Background(), conn)
+	client := reflection.NewClient(conn)
 	srv.reflectionClient = client
 	return client, nil
 }
 
-// updateServices checks all upstream server of a specific provider and resolves the services they expose.
-func (p *Proxy) UpdateServices(provider string) {
-	type result struct {
-		server          *upstreamServer
-		services        []string
-		fileDescriptors []protoreflect.FileDescriptor
+func (srv *upstreamServer) stopWatchingServices() {
+	if srv.stopServiceWatcher != nil {
+		srv.stopServiceWatcher()
+	}
+}
+
+func (srv *upstreamServer) watchServices(ctx context.Context, proxy *Proxy) error {
+	srv.logger.Debug("Service watcher started")
+
+	ctx, cancel := context.WithCancel(ctx)
+	srv.stopServiceWatcher = cancel
+	defer func() {
+		cancel()
+		srv.stopServiceWatcher = nil
+		srv.logger.Debug("Service watcher stopped")
+	}()
+
+	client, err := srv.reflectClient()
+	if err != nil {
+		return err
 	}
 
-	p.serverMutex.RLock()
-	upstreams := p.servers[provider]
-	p.serverMutex.RUnlock()
-	results := make([]result, len(upstreams))
-	wg := sync.WaitGroup{}
-	wg.Add(len(upstreams))
+	for {
+		var info serviceInfoResult
+		var err error
 
-	logger := p.logger.With(zap.String("provider", provider))
-	logger.Debug("Updating upstream servers", zap.Int("count", len(upstreams)))
-
-	for i, server := range upstreams {
-		go func(i int, server *upstreamServer) {
-			defer wg.Done()
-
-			logger := logger.With(zap.String("target_host", server.config.Address))
-			client, err := server.reflectClient()
+		for {
+			info, err = srv.getServiceInfo()
 			if err != nil {
-				logger.Error("Failed to create reflection client", zap.Error(err))
-				return
+				srv.logger.Error("Failed to get service info", zap.Error(err))
+				time.Sleep(time.Second * 10)
+				continue
 			}
+			break
+		}
 
-			services, err := client.ListServices()
-			if err != nil {
-				logger.Error("Failed to query services", zap.Error(err))
-				return
-			}
+		proxy.replaceServices(srv, info)
 
-			var fds []protoreflect.FileDescriptor
-			for _, service := range services {
-				fd, err := client.FileContainingSymbol(service)
-				if err != nil {
-					logger.Error("Failed to resolve service", zap.String("service_name", service))
-					continue
-				}
-
-				fds = append(fds, fd.UnwrapFile())
-			}
-
-			results[i] = result{
-				server:          server,
-				services:        services,
-				fileDescriptors: fds,
-			}
-		}(i, server)
+		select {
+		case <-client.Disconnected():
+			srv.logger.Debug("Lost connection to server")
+			time.Sleep(time.Second * 10)
+			srv.logger.Info("Refreshing service info")
+			continue
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+}
 
-	wg.Wait()
+func (p *Proxy) replaceServices(targetServer *upstreamServer, info serviceInfoResult) {
+	p.logger.Debug("Replacing services", zap.String("target_host", targetServer.config.Address), zap.Strings("services", info.services))
 
 	p.servicesMutex.Lock()
 	defer p.servicesMutex.Unlock()
@@ -95,26 +93,57 @@ func (p *Proxy) UpdateServices(provider string) {
 	for _, service := range p.services {
 		var filtered []*upstreamServer
 		for _, server := range service.servers {
-			if server.provider != provider {
+			if server != targetServer {
 				filtered = append(filtered, server)
 			}
 		}
 		service.servers = filtered
 	}
 
-	for _, result := range results {
-		for _, serviceName := range result.services {
-			service := p.services[serviceName]
-			if service == nil {
-				service = &upstreamService{}
-				p.services[serviceName] = service
-			}
-
-			if err := p.reflectionResolver.RegisterFiles(result.fileDescriptors); err != nil {
-				p.logger.Error("Failed to register proto files for server", zap.Error(err), zap.String("target_host", result.server.config.Address))
-			}
-
-			service.servers = append(service.servers, result.server)
+	for _, serviceName := range info.services {
+		service := p.services[serviceName]
+		if service == nil {
+			service = &upstreamService{}
+			p.services[serviceName] = service
 		}
+
+		if err := p.reflectionResolver.RegisterFiles(info.fileDescriptors); err != nil {
+			p.logger.Error("Failed to register proto files for server", zap.Error(err))
+		}
+
+		service.servers = append(service.servers, targetServer)
 	}
+}
+
+type serviceInfoResult struct {
+	services        []string
+	fileDescriptors []protoreflect.FileDescriptor
+}
+
+func (srv *upstreamServer) getServiceInfo() (serviceInfoResult, error) {
+	client, err := srv.reflectClient()
+	if err != nil {
+		return serviceInfoResult{}, err
+	}
+
+	services, err := client.ListServices()
+	if err != nil {
+		return serviceInfoResult{}, err
+	}
+
+	var fds []protoreflect.FileDescriptor
+	for _, service := range services {
+		allFiles, err := client.AllFilesForSymbol(service)
+		if err != nil {
+			srv.logger.Error("Failed to resolve service", zap.String("service_name", service))
+			continue
+		}
+
+		fds = append(fds, allFiles...)
+	}
+
+	return serviceInfoResult{
+		services:        services,
+		fileDescriptors: fds,
+	}, nil
 }

@@ -215,7 +215,6 @@ func (prov *Docker) handleContainerList(containers []types.Container) error {
 	}
 
 	prov.target.ReplaceServers(prov.Name, servers)
-	time.AfterFunc(time.Second*10, func() { prov.target.UpdateServices(prov.Name) })
 	return nil
 }
 
