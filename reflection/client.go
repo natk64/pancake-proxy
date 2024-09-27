@@ -23,8 +23,6 @@ type ReflectionClient struct {
 	v1           reflectionStream
 	v1alpha      reflectionStream
 	disconnected chan struct{}
-
-	receivedFiles map[string]protoreflect.FileDescriptor
 }
 
 // Connected returns true if the client has an open stream to the server.
@@ -127,7 +125,6 @@ func NewClient(conn *grpc.ClientConn) *ReflectionClient {
 	client := &ReflectionClient{
 		v1Client:      grpc_reflection_v1.NewServerReflectionClient(conn),
 		v1alphaClient: grpc_reflection_v1alpha.NewServerReflectionClient(conn),
-		receivedFiles: make(map[string]protoreflect.FileDescriptor),
 	}
 
 	return client
