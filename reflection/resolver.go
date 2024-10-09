@@ -64,14 +64,22 @@ func (cr *SimpleResolver) GetExtensionsByMessage(message protoreflect.FullName) 
 func (cr *SimpleResolver) FindDescriptorByName(name protoreflect.FullName) (protoreflect.Descriptor, error) {
 	cr.mutex.RLock()
 	defer cr.mutex.RUnlock()
-	return cr.descriptors[name], nil
+	desc := cr.descriptors[name]
+	if desc == nil {
+		return nil, protoregistry.NotFound
+	}
+	return desc, nil
 }
 
 // FindFileByPath implements protodesc.Resolver.
 func (cr *SimpleResolver) FindFileByPath(path string) (protoreflect.FileDescriptor, error) {
 	cr.mutex.RLock()
 	defer cr.mutex.RUnlock()
-	return cr.files[path], nil
+	desc := cr.files[path]
+	if desc == nil {
+		return nil, protoregistry.NotFound
+	}
+	return desc, nil
 }
 
 func (cr *SimpleResolver) Clear() {
@@ -129,11 +137,12 @@ func (cr *SimpleResolver) registerFileLocked(fd protoreflect.FileDescriptor) {
 	for i := 0; i < extensions.Len(); i++ {
 		extension := extensions.Get(i)
 		name := extension.FullName()
+		containingMessage := extension.ContainingMessage().FullName()
 		cr.descriptors[name] = extension
-		mapEntry := cr.extensionMap[name]
+		mapEntry := cr.extensionMap[containingMessage]
 		if mapEntry == nil {
 			mapEntry = make(map[protowire.Number]protoreflect.FieldDescriptor)
-			cr.extensionMap[extension.Message().FullName()] = mapEntry
+			cr.extensionMap[containingMessage] = mapEntry
 		}
 
 		mapEntry[extension.Number()] = extension
