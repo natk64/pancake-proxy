@@ -138,12 +138,14 @@ func (g *grpcWebResponseWriter) Finish() {
 		trailers[key] = value
 	}
 
-	buf := &bytes.Buffer{}
-	trailers.Write(buf)
-	frameHeader := make([]byte, 5)
-	frameHeader[0] = 0b10000000
-	binary.BigEndian.PutUint32(frameHeader[1:], uint32(buf.Len()))
-	g.inner.Write(frameHeader)
-	g.inner.Write(buf.Bytes())
+	if len(trailers) != 0 {
+		buf := &bytes.Buffer{}
+		trailers.Write(buf)
+		frameHeader := make([]byte, 5)
+		frameHeader[0] = 0b10000000
+		binary.BigEndian.PutUint32(frameHeader[1:], uint32(buf.Len()))
+		g.inner.Write(frameHeader)
+		g.inner.Write(buf.Bytes())
+	}
 	g.Flush()
 }
