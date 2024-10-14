@@ -135,7 +135,7 @@ func (srv *upstreamServer) getServiceInfo() (serviceInfoResult, error) {
 	for _, service := range services {
 		allFiles, err := client.AllFilesForSymbol(service)
 		if err != nil {
-			srv.logger.Error("Failed to resolve service", zap.String("service_name", service))
+			srv.logger.Error("Failed to resolve service", zap.String("service_name", service), zap.Error(err))
 			continue
 		}
 
