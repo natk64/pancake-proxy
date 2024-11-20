@@ -37,6 +37,8 @@ func main() {
 	viper.SetDefault("tls.keyFile", filepath.Join(configDir, "server.key"))
 	viper.SetDefault("pprof.enabled", false)
 	viper.SetDefault("docker.enabled", false)
+	viper.SetDefault("dashboard.enabled", false)
+	viper.SetDefault("dashboard.bindAddress", ":8081")
 
 	var logger *zap.Logger
 	if viper.GetBool("logger.development") {
@@ -91,6 +93,10 @@ func main() {
 		go runPprofListener(logger.Named("pprof_server"))
 	}
 
+	if viper.GetBool("dashboard.enabled") {
+		go runDashboardListener(srv, logger, viper.GetString("dashboard.bindAddress"))
+	}
+
 	var handler http.Handler
 	if viper.GetBool("cors.enabled") {
 		cors := cors.New(cors.Options{
@@ -132,6 +138,20 @@ func runPprofListener(logger *zap.Logger) {
 	logger.Info("Starting pprof server", zap.String("address", srv.Addr))
 	err := srv.ListenAndServe()
 	logger.Error("pprof server stopped", zap.Error(err))
+}
+
+func runDashboardListener(p *proxy.Proxy, logger *zap.Logger, addr string) {
+	dashboardServeMux := http.NewServeMux()
+	dashboardServeMux.HandleFunc("/", p.DashboardHandler)
+
+	srv := &http.Server{
+		Handler: dashboardServeMux,
+		Addr:    addr,
+	}
+
+	logger.Info("Starting dashboard server", zap.String("address", srv.Addr))
+	err := srv.ListenAndServe()
+	logger.Error("Dashboard server stopped", zap.Error(err))
 }
 
 func getStaticServers(logger *zap.Logger) []proxy.UpstreamConfig {

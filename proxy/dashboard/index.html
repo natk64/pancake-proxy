@@ -1,0 +1,59 @@
+<html>
+
+<head>
+    <style>
+        html {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            html {
+                background-color: #141414;
+                color: white;
+            }
+        }
+
+        label,
+        .standalone {
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Pancake Proxy</h1>
+
+    <h2>Settings</h2>
+    <label>Reflection</label> {{if .ReflectionDisabled}} Disabled {{else}} Enabled {{end}}
+
+    <h2>Services</h2>
+    {{range .Services}}
+    <div>
+        <h3>{{.Name}}</h3>
+        <ul>
+            {{range .Servers}}
+            <li>{{.Config.Address}}</li>
+            {{end}}
+        </ul>
+    </div>
+    {{end}}
+
+    <h2>Servers</h2>
+    {{range .Servers}}
+    <div>
+        <h3>{{.Config.Address}}</h3>
+        <label>Provider</label> <span>{{.Provider}}</span> <br>
+        <label>Address</label> <span>{{.Config.Address}}</span> <br>
+        <label>TLS</label> <span> {{if .Config.Plaintext}} Disabled {{else}} Enabled {{end}} </span> <br>
+        {{if .Config.InsecureSkipVerify}} <span class="standalone">Insecure Skip Verify</span> <br> {{end}}
+
+        <ul>
+            {{range .Services}}
+            <li>{{.Name}}</li>
+            {{end}}
+        </ul>
+    </div>
+    {{end}}
+</body>
+
+</html>
