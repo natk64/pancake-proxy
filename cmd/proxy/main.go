@@ -142,7 +142,7 @@ func runPprofListener(logger *zap.Logger) {
 
 func runDashboardListener(p *proxy.Proxy, logger *zap.Logger, addr string) {
 	dashboardServeMux := http.NewServeMux()
-	dashboardServeMux.HandleFunc("/", p.DashboardHandler)
+	dashboardServeMux.HandleFunc("/{$}", p.DashboardHandler)
 
 	srv := &http.Server{
 		Handler: dashboardServeMux,

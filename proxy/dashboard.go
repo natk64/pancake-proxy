@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"cmp"
 	_ "embed"
 	"html/template"
 	"net/http"
+	"slices"
 
 	"go.uber.org/zap"
 )
@@ -30,8 +32,9 @@ type DashboardContext struct {
 	UnknownServer      *DashboardServerInfo
 }
 
-var unknownServer = &DashboardServerInfo{}
+var unknownServer = &DashboardServerInfo{Config: UpstreamConfig{Address: "INVALID SERVER"}}
 
+// DashboardContext creates the struct that is used as the template data for the dashboard.
 func (p *Proxy) DashboardContext() DashboardContext {
 	p.serverMutex.RLock()
 	defer p.serverMutex.RUnlock()
@@ -55,7 +58,12 @@ func (p *Proxy) DashboardContext() DashboardContext {
 
 	p.servicesMutex.RLock()
 	defer p.servicesMutex.RUnlock()
-	for serviceName, service := range p.services {
+
+	servicesSorted := sortedKVs(p.services)
+
+	for _, kv := range servicesSorted {
+		service := kv.value
+		serviceName := kv.key
 		serviceInfo := &DashboardServiceInfo{
 			Name:    serviceName,
 			Servers: make([]*DashboardServerInfo, len(service.servers)),
@@ -85,9 +93,26 @@ func (p *Proxy) DashboardContext() DashboardContext {
 	}
 }
 
+// DashboardHandler serves the dashboard index.html file.
 func (p *Proxy) DashboardHandler(w http.ResponseWriter, r *http.Request) {
 	if err := dashboardTemplate.Execute(w, p.DashboardContext()); err != nil {
 		p.logger.Error("Failed to execute dashboard template", zap.Error(err))
 		w.WriteHeader(500)
 	}
+}
+
+type kv[K, V any] struct {
+	key   K
+	value V
+}
+
+func sortedKVs[K cmp.Ordered, V any](m map[K]V) []kv[K, V] {
+	kvs := make([]kv[K, V], 0, len(m))
+	for key, value := range m {
+		kvs = append(kvs, kv[K, V]{key: key, value: value})
+	}
+	slices.SortFunc(kvs, func(a, b kv[K, V]) int {
+		return cmp.Compare(a.key, b.key)
+	})
+	return kvs
 }
