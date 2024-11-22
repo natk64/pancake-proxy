@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"slices"
 
 	"github.com/natk64/pancake-proxy/reflection"
 	"go.uber.org/zap"
@@ -71,6 +72,20 @@ func (server *upstreamServer) dialOptions() []grpc.DialOption {
 	}
 }
 
+// cleanupServer should be run when a server is removed from the server list.
+func (p *Proxy) cleanupServer(server *upstreamServer) {
+	server.stopWatchingServices()
+	p.servicesMutex.Lock()
+	defer p.servicesMutex.Unlock()
+
+	for _, service := range p.services {
+		if serverIndex := slices.Index(service.servers, server); serverIndex != -1 {
+			service.servers[serverIndex] = service.servers[len(service.servers)-1]
+			service.servers = service.servers[:len(service.servers)-1]
+		}
+	}
+}
+
 func (p *Proxy) ReplaceServers(provider string, newConfigs []UpstreamConfig) {
 	shouldBuildConfigs := make(map[UpstreamConfig]bool)
 	for _, server := range newConfigs {
@@ -88,7 +103,7 @@ func (p *Proxy) ReplaceServers(provider string, newConfigs []UpstreamConfig) {
 			newServers = append(newServers, server)
 			shouldBuildConfigs[server.config] = false
 		} else {
-			server.stopWatchingServices()
+			p.cleanupServer(server)
 		}
 	}
 
