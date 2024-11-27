@@ -185,7 +185,13 @@ func (prov *Docker) handleContainerList(containers []types.Container) error {
 	var servers []proxy.UpstreamConfig
 
 	for _, container := range containers {
-		if prov.ExposeMode == ExposeManual && container.Labels[prov.labels.enable] != "true" {
+		enable, err := strconv.ParseBool(container.Labels[prov.labels.enable])
+		if err == nil && !enable {
+			// Container is explicitly ignored.
+			continue
+		}
+
+		if prov.ExposeMode == ExposeManual && !enable {
 			continue
 		}
 

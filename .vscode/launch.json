@@ -12,7 +12,7 @@
             "program": "cmd/proxy",
             "env": {
                 "PANCAKE_LOGGER_DEVELOPMENT": "true",
-                "PANCAKE_UPDATE_INTERVAL": "5s"
+                "PANCAKE_SERVICE_UPDATE_INTERVAL": "5s"
             }
         }
     ]
