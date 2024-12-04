@@ -20,6 +20,8 @@ type ReflectionClient struct {
 	v1Client      grpc_reflection_v1.ServerReflectionClient
 	v1alphaClient grpc_reflection_v1alpha.ServerReflectionClient
 
+	descriptorCache map[string]*descriptorpb.FileDescriptorProto
+
 	v1           reflectionStream
 	v1alpha      reflectionStream
 	disconnected chan struct{}
@@ -66,16 +68,37 @@ func (client *ReflectionClient) AllFilesForSymbol(fullName string) ([]protorefle
 		return nil, err
 	}
 
+	includedDependencies := make(map[string]struct{})
+	if client.descriptorCache == nil {
+		client.descriptorCache = make(map[string]*descriptorpb.FileDescriptorProto)
+	}
+
 	descriptorProtos := make([]*descriptorpb.FileDescriptorProto, len(encodedDescriptors))
 	for i, data := range encodedDescriptors {
 		var descriptor descriptorpb.FileDescriptorProto
 		if err := proto.Unmarshal(data, &descriptor); err != nil {
 			return nil, err
 		}
+
 		descriptorProtos[i] = &descriptor
+		includedDependencies[descriptor.GetName()] = struct{}{}
+		client.descriptorCache[descriptor.GetName()] = descriptorProtos[i]
 	}
 
-	descriptorMap, err := desc.CreateFileDescriptors(descriptorProtos)
+	var unsentDeps []*descriptorpb.FileDescriptorProto
+	for _, descriptor := range descriptorProtos {
+		for _, dep := range descriptor.Dependency {
+			if _, included := includedDependencies[dep]; included {
+				continue
+			}
+
+			if depDescriptor := client.descriptorCache[dep]; depDescriptor != nil {
+				unsentDeps = append(unsentDeps, depDescriptor)
+			}
+		}
+	}
+
+	descriptorMap, err := desc.CreateFileDescriptors(append(descriptorProtos, unsentDeps...))
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +142,7 @@ func (client *ReflectionClient) streamDisconnected() {
 	}
 	client.v1 = nil
 	client.v1alpha = nil
+	client.descriptorCache = nil
 }
 
 func NewClient(conn *grpc.ClientConn) *ReflectionClient {
