@@ -68,7 +68,6 @@ func (client *ReflectionClient) AllFilesForSymbol(fullName string) ([]protorefle
 		return nil, err
 	}
 
-	includedDependencies := make(map[string]struct{})
 	if client.descriptorCache == nil {
 		client.descriptorCache = make(map[string]*descriptorpb.FileDescriptorProto)
 	}
@@ -81,24 +80,15 @@ func (client *ReflectionClient) AllFilesForSymbol(fullName string) ([]protorefle
 		}
 
 		descriptorProtos[i] = &descriptor
-		includedDependencies[descriptor.GetName()] = struct{}{}
 		client.descriptorCache[descriptor.GetName()] = descriptorProtos[i]
 	}
 
-	var unsentDeps []*descriptorpb.FileDescriptorProto
-	for _, descriptor := range descriptorProtos {
-		for _, dep := range descriptor.Dependency {
-			if _, included := includedDependencies[dep]; included {
-				continue
-			}
-
-			if depDescriptor := client.descriptorCache[dep]; depDescriptor != nil {
-				unsentDeps = append(unsentDeps, depDescriptor)
-			}
-		}
+	cachedDeps := make([]*descriptorpb.FileDescriptorProto, 0, len(client.descriptorCache))
+	for _, descriptor := range client.descriptorCache {
+		cachedDeps = append(cachedDeps, descriptor)
 	}
 
-	descriptorMap, err := desc.CreateFileDescriptors(append(descriptorProtos, unsentDeps...))
+	descriptorMap, err := desc.CreateFileDescriptors(append(descriptorProtos, cachedDeps...))
 	if err != nil {
 		return nil, err
 	}
