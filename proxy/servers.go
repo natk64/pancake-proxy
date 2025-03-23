@@ -74,6 +74,7 @@ func (server *upstreamServer) dialOptions() []grpc.DialOption {
 
 // cleanupServer should be run when a server is removed from the server list.
 func (p *Proxy) cleanupServer(server *upstreamServer) {
+	server.logger.Debug("Cleaning up server")
 	server.stopWatchingServices()
 	p.servicesMutex.Lock()
 	defer p.servicesMutex.Unlock()
@@ -87,6 +88,8 @@ func (p *Proxy) cleanupServer(server *upstreamServer) {
 }
 
 func (p *Proxy) ReplaceServers(provider string, newConfigs []UpstreamConfig) {
+	p.logger.Info("Replacing servers of provider", zap.String("provider", provider), zap.Int("count", len(newConfigs)))
+
 	shouldBuildConfigs := make(map[UpstreamConfig]bool)
 	for _, server := range newConfigs {
 		shouldBuildConfigs[server] = true
@@ -112,6 +115,7 @@ func (p *Proxy) ReplaceServers(provider string, newConfigs []UpstreamConfig) {
 			server := newUpstream(provider, config, p.logger.Named("upstream").With(zap.String("upstream_host", config.Address)))
 			go server.watchServices(context.Background(), p)
 			newServers = append(newServers, server)
+			server.logger.Debug("Adding server to new server list")
 		}
 	}
 

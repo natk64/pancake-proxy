@@ -62,20 +62,31 @@ func (srv *upstreamServer) watchServices(ctx context.Context, proxy *Proxy) erro
 
 		for {
 			info, err = srv.getServiceInfo()
-			if err != nil {
-				srv.logger.Error("Failed to get service info", zap.Error(err))
-				time.Sleep(time.Second * 10)
-				continue
+			if err == nil {
+				break
 			}
-			break
+
+			srv.logger.Error("Failed to get service info", zap.Error(err))
+			select {
+			case <-time.After(time.Second * 10):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		proxy.replaceServices(srv, info)
 
 		select {
 		case <-client.Disconnected():
 			srv.logger.Debug("Lost connection to server")
-			time.Sleep(time.Second * 10)
+			select {
+			case <-time.After(time.Second * 10):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			srv.logger.Info("Refreshing service info")
 			continue
 		case <-ctx.Done():
